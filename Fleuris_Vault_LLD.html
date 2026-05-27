@@ -1,0 +1,245 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Fleuris Vault – Low-Level Design (LLD)</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; margin: 2em; background: #fff; color: #222; }
+        h1, h2, h3, h4 { color: #a51c30; }
+        code, pre { background: #f4f4f4; padding: 2px 4px; border-radius: 3px; }
+        .section { margin-bottom: 2em; }
+        ul, ol { margin-left: 2em; }
+        .footer { margin-top: 3em; font-size: 0.9em; color: #888; }
+        table { border-collapse: collapse; margin: 1em 0; }
+        th, td { border: 1px solid #bbb; padding: 4px 8px; }
+        th { background: #f9eaea; }
+        .diagram { background: #f4f4f4; padding: 1em; border-radius: 6px; font-family: monospace; }
+    </style>
+</head>
+<body>
+<h1>Fleuris Vault – Low-Level Design (LLD)</h1>
+
+<div class="section">
+<h2>1. Introduction & Purpose</h2>
+<p>Fleuris Vault is a secure digital banking demo platform built with Flask, SQLite, and Jinja templates. It demonstrates robust security controls, including password hashing, CSRF protection, brute-force lockout, audit logging, and role-based access control, following OWASP best practices. This LLD details the internal structure, data flows, security mechanisms, and deployment specifics for maintainers and auditors.</p>
+</div>
+
+<div class="section">
+<h2>2. Technology Stack</h2>
+<ul>
+<li><b>Backend:</b> Python 3.12, Flask 2.3</li>
+<li><b>Database:</b> SQLite (local file <code>bank.db</code>)</li>
+<li><b>Frontend:</b> Jinja2 templates, HTML, CSS</li>
+<li><b>Security:</b> Werkzeug password hashing, pyotp (MFA), qrcode (MFA QR), custom security headers</li>
+<li><b>Deployment:</b> Gunicorn (Procfile), Render.com ready</li>
+</ul>
+</div>
+
+<div class="section">
+<h2>3. High-Level Architecture Diagram</h2>
+<div class="diagram">
+User Browser → Flask App (app.py) → [Templates, DB, Static, Security Log]
+</div>
+<ul>
+<li>All HTTP(S) requests are routed through Flask, which handles authentication, session, and security logic.</li>
+<li>Templates are rendered server-side using Jinja2.</li>
+<li>All persistent data is stored in SQLite; security events are also logged to a file.</li>
+</ul>
+</div>
+
+<div class="section">
+<h2>4. Detailed Module Breakdown</h2>
+<h3>4.1 Flask App Structure (<code>app.py</code>)</h3>
+<ul>
+<li><b>App Initialization:</b> Sets up Flask app, secret key, session config, logging, security headers.</li>
+<li><b>Database Connection:</b> <code>get_db()</code> opens SQLite connection per request, <code>close_connection()</code> closes on teardown.</li>
+<li><b>Security Headers:</b> <code>add_security_headers()</code> injects CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy into every response.</li>
+<li><b>Logging:</b> Python logging writes to <code>security.log</code> and DB table <code>security_events</code>.</li>
+<li><b>CSRF Protection:</b> <code>csrf_token()</code> generates session-bound CSRF token; <code>require_csrf_token()</code> validates on POST.</li>
+<li><b>User Session Management:</b> <code>current_user()</code> returns user row from session; <code>login_required()</code> decorator for protected routes.</li>
+<li><b>Route Handlers:</b>
+    <ul>
+        <li><code>/</code> – Home page</li>
+        <li><code>/login</code>, <code>/logout</code>, <code>/mfa-setup</code> – Authentication and MFA setup</li>
+        <li><code>/dashboard</code> – User/admin dashboard with role-based content</li>
+        <li><code>/transfer</code> – Customer money transfer (CSRF, balance, recipient checks)</li>
+        <li><code>/statement</code>, <code>/statement/&lt;id&gt;</code> – Account statements (role/ownership checks)</li>
+        <li><code>/users</code>, <code>/admin/users/&lt;id&gt;</code> – Admin user management, unlock, detail</li>
+        <li><code>/security</code>, <code>/security-log</code> – Admin security center/log (DB/file)</li>
+        <li><code>/security-demo</code>, <code>/demo-controls</code> – Demo & controls for security features</li>
+    </ul>
+</li>
+<li><b>Error Handlers:</b> Custom 400, 403, 404, 500 error pages.</li>
+<li><b>Database Initialization:</b> <code>init_db()</code> creates tables, seeds demo users, ensures schema.</li>
+</ul>
+
+<h3>4.2 Database Schema</h3>
+<h4>Table: <code>users</code></h4>
+<table>
+<tr><th>Column</th><th>Type</th><th>Description</th></tr>
+<tr><td>id</td><td>INTEGER</td><td>Primary key</td></tr>
+<tr><td>username</td><td>TEXT</td><td>Unique username</td></tr>
+<tr><td>password_hash</td><td>TEXT</td><td>Hashed password (Werkzeug)</td></tr>
+<tr><td>balance</td><td>REAL</td><td>Account balance</td></tr>
+<tr><td>role</td><td>TEXT</td><td>'customer' or 'admin'</td></tr>
+<tr><td>failed_login_count</td><td>INTEGER</td><td>Failed login attempts</td></tr>
+<tr><td>locked_until</td><td>TEXT</td><td>ISO timestamp for lockout</td></tr>
+<tr><td>totp_secret</td><td>TEXT</td><td>MFA TOTP secret (base32)</td></tr>
+</table>
+
+<h4>Table: <code>transactions</code></h4>
+<table>
+<tr><th>Column</th><th>Type</th><th>Description</th></tr>
+<tr><td>id</td><td>INTEGER</td><td>Primary key</td></tr>
+<tr><td>from_user</td><td>INTEGER</td><td>Sender user id (FK)</td></tr>
+<tr><td>to_user</td><td>INTEGER</td><td>Recipient user id (FK)</td></tr>
+<tr><td>amount</td><td>REAL</td><td>Transfer amount</td></tr>
+<tr><td>reference_code</td><td>TEXT</td><td>Unique reference code</td></tr>
+<tr><td>status</td><td>TEXT</td><td>'completed'</td></tr>
+<tr><td>description</td><td>TEXT</td><td>Transfer description</td></tr>
+<tr><td>timestamp</td><td>DATETIME</td><td>Creation timestamp</td></tr>
+</table>
+
+<h4>Table: <code>security_events</code></h4>
+<table>
+<tr><th>Column</th><th>Type</th><th>Description</th></tr>
+<tr><td>id</td><td>INTEGER</td><td>Primary key (autoincrement)</td></tr>
+<tr><td>event_type</td><td>TEXT</td><td>Event type (LOGIN_FAILED, CSRF_BLOCKED, etc)</td></tr>
+<tr><td>user_id</td><td>INTEGER</td><td>User id (nullable)</td></tr>
+<tr><td>ip_address</td><td>TEXT</td><td>IP address of event</td></tr>
+<tr><td>detail</td><td>TEXT</td><td>Event details</td></tr>
+<tr><td>created_at</td><td>DATETIME</td><td>Timestamp</td></tr>
+</table>
+
+<h3>4.3 Security Features (with Implementation Details)</h3>
+<ul>
+<li><b>Password Hashing:</b> Uses <code>werkzeug.security.generate_password_hash</code> and <code>check_password_hash</code>. No plaintext password storage; legacy column is nulled.</li>
+<li><b>Brute-force Lockout:</b> On failed login, <code>failed_login_count</code> incremented. After 5 failures, <code>locked_until</code> set to 10 minutes in future. Login checks <code>locked_until</code> before allowing authentication.</li>
+<li><b>CSRF Protection:</b> <code>csrf_token()</code> generates a random token per session. All POST forms include hidden CSRF token field. <code>require_csrf_token()</code> aborts with 400 if token missing/invalid.</li>
+<li><b>Security Headers:</b> Set via <code>after_request</code> for every response. CSP restricts sources, X-Frame-Options DENY, etc.</li>
+<li><b>Audit Logging:</b> <code>log_event()</code> writes to both <code>security.log</code> and <code>security_events</code> table. All sensitive actions (login, transfer, access denied) are logged.</li>
+<li><b>Access Control:</b> Role checks for admin/customer on all sensitive routes. Ownership checks for statement access. 403 error and event log on violation.</li>
+<li><b>MFA (TOTP):</b> Users can enable TOTP via <code>/mfa-setup</code>. QR code generated for authenticator apps. Login requires TOTP code if enabled.</li>
+</ul>
+
+<h3>4.4 User Roles & Access</h3>
+<ul>
+<li><b>Customer:</b> Can view dashboard, transfer funds, view own statement. Cannot access admin or other users' data.</li>
+<li><b>Admin:</b> Can view all users, unlock accounts, view all statements, security events, logs, and demo controls. Cannot perform transfers or view own statement.</li>
+</ul>
+</div>
+
+<div class="section">
+<h2>5. Data Flow Diagrams</h2>
+<h3>5.1 Login Flow</h3>
+<ol>
+<li>User submits username, password (and MFA code if enabled).</li>
+<li>System checks for lockout (<code>locked_until</code>).</li>
+<li>Password hash verified.</li>
+<li>If TOTP enabled, code is verified.</li>
+<li>On success: session set, failed count reset, event logged.</li>
+<li>On failure: failed count incremented, lockout if needed, event logged.</li>
+</ol>
+
+<h3>5.2 Transfer Flow</h3>
+<ol>
+<li>Customer selects recipient, amount, description.</li>
+<li>CSRF token validated.</li>
+<li>Recipient and amount validated (not self, within limits, sufficient balance).</li>
+<li>If review step, show confirmation.</li>
+<li>On confirm, balances updated, transaction inserted, event logged.</li>
+</ol>
+
+<h3>5.3 Admin Unlock Flow</h3>
+<ol>
+<li>Admin selects user to unlock.</li>
+<li>CSRF token validated.</li>
+<li><code>failed_login_count</code> and <code>locked_until</code> reset.</li>
+<li>Event logged.</li>
+</ol>
+</div>
+
+<div class="section">
+<h2>6. Template & Static Asset Structure</h2>
+<ul>
+<li><b>templates/</b>
+    <ul>
+        <li><code>base.html</code>: Layout, navigation, flash messages, footer.</li>
+        <li><code>dashboard.html</code>: User/admin dashboard.</li>
+        <li><code>login.html</code>: Login form, error display.</li>
+        <li><code>mfa_setup.html</code>: MFA QR, secret, enable form.</li>
+        <li><code>transfer.html</code>: Transfer form, review, messages.</li>
+        <li><code>statement.html</code>: Transaction list, filters.</li>
+        <li><code>users.html</code>: Admin user list, search, lock status.</li>
+        <li><code>admin_user_detail.html</code>: Admin view of user, transactions, events.</li>
+        <li><code>security.html</code>: Security event log, filters.</li>
+        <li><code>security_log.html</code>: File-based log view.</li>
+        <li><code>demo_controls.html</code>: Admin demo actions.</li>
+        <li><code>security_demo.html</code>: Security feature showcase.</li>
+        <li><code>error.html</code>: Error display for 400/403/404/500.</li>
+    </ul>
+</li>
+<li><b>static/</b>
+    <ul>
+        <li><code>style.css</code>: All branding, layout, and responsive design.</li>
+    </ul>
+</li>
+</ul>
+</div>
+
+<div class="section">
+<h2>7. Deployment & Environment</h2>
+<ul>
+<li><b>requirements.txt:</b> Flask, gunicorn, pyotp, qrcode, Pillow.</li>
+<li><b>Procfile:</b> Gunicorn start command.</li>
+<li><b>runtime.txt:</b> Python version pin.</li>
+<li><b>RENDER_DEPLOYMENT.md:</b> Render.com setup guide.</li>
+<li><b>Environment:</b> <code>AEGIS_SECRET_KEY</code> required for session security.</li>
+<li><b>Database:</b> SQLite file auto-initialized on first run.</li>
+</ul>
+</div>
+
+<div class="section">
+<h2>8. Security Considerations (Expanded)</h2>
+<ul>
+<li>All user input is parameterized in SQL (no string interpolation).</li>
+<li>Session cookies are HTTPOnly, SameSite=Lax, 30 min expiry.</li>
+<li>Security events and log file for audit and forensics.</li>
+<li>MFA available for all users, enforced if enabled.</li>
+<li>No plaintext password storage; legacy column nulled on migration.</li>
+<li>Admins cannot perform customer actions (transfers, statements for self).</li>
+<li>Customers cannot access other users' data or admin routes.</li>
+<li>All sensitive actions (login, transfer, unlock, access denied) are logged.</li>
+<li>Security headers enforced for every response.</li>
+<li>Demo controls allow safe testing of lockout, seeding, and event clearing.</li>
+</ul>
+</div>
+
+<div class="section">
+<h2>9. Appendix</h2>
+<h3>Demo Accounts</h3>
+<ul>
+<li>alex / pass (customer)</li>
+<li>morgan / pass (customer)</li>
+<li>taylor / pass (customer)</li>
+<li>casey / pass (customer)</li>
+<li>raghav / 123 (admin)</li>
+</ul>
+<h3>Key Endpoints</h3>
+<ul>
+<li><code>/dashboard</code>, <code>/transfer</code>, <code>/statement</code>, <code>/users</code>, <code>/security</code>, <code>/security-log</code>, <code>/security-demo</code>, <code>/demo-controls</code></li>
+</ul>
+<h3>Example Security Events</h3>
+<ul>
+<li>LOGIN_SUCCESS, LOGIN_FAILED, MFA_FAILED, LOGIN_LOCKED, CSRF_BLOCKED, ACCESS_DENIED, TRANSFER_CREATED, ACCOUNT_UNLOCKED, DEMO_SEEDED, DEMO_LOCKED_USER, DEMO_CLEARED_EVENTS</li>
+</ul>
+</div>
+
+<div class="footer">
+    <hr>
+    <p>This document provides a comprehensive low-level design for the Fleuris Vault project, suitable for review and implementation reference.</p>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}{{ brand_name }} — Login{% endblock %}
+{% block description %}Sign in to Fleuris Vault to access your account.{% endblock %}
+
+{% block content %}
+<section class="auth-layout">
+    <div>
+        <p class="eyebrow">Member access</p>
+        <h1>Welcome back</h1>
+        <p class="muted">
+            Sign in to manage balances, move funds, and review account activity.
+        </p>
+        <div class="credential-box">
+            <strong style="font-size:0.875rem;">Welcome back</strong>
+            <p class="muted" style="margin:0;font-size:0.82rem;">Enter your Fleuris Vault credentials to access your account securely.</p>
+        </div>
+    </div>
+
+    <form class="form-card" method="POST" id="login-form">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" autocomplete="username" required
+               placeholder="Enter username">
+
+        <label for="password">Password</label>
+        <div class="input-wrap">
+            <input type="password" id="password" name="password"
+                   autocomplete="current-password" required placeholder="••••••••">
+            <button type="button" class="input-icon-btn" id="pw-toggle"
+                    aria-label="Show or hide password" title="Show/hide password">👁</button>
+        </div>
+
+        <label for="mfa_code">MFA code <span class="muted" style="font-weight:400;text-transform:none;">(if enabled)</span></label>
+        <input type="text" id="mfa_code" name="mfa_code"
+               autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]*"
+               placeholder="6-digit code" maxlength="6">
+
+        <button type="submit" id="login-btn">Sign in →</button>
+
+        {% if error %}
+            <p class="alert error" role="alert">✕ {{ error }}</p>
+        {% endif %}
+    </form>
+</section>
+
+<script>
+// Password show/hide
+const pwInput = document.getElementById('password');
+const pwToggle = document.getElementById('pw-toggle');
+if (pwToggle && pwInput) {
+    pwToggle.addEventListener('click', () => {
+        const show = pwInput.type === 'password';
+        pwInput.type = show ? 'text' : 'password';
+        pwToggle.textContent = show ? '🙈' : '👁';
+        pwInput.focus();
+    });
+}
+</script>
+{% endblock %}

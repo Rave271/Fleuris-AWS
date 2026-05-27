@@ -1,0 +1,15 @@
+[Unit]
+Description=Fleuris Vault Gunicorn Service
+After=network.target postgresql.service
+
+[Service]
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/fleuris-vault
+EnvironmentFile=/opt/fleuris-vault/.env
+ExecStart=/opt/fleuris-vault/.venv/bin/gunicorn "src.app:create_app()" --workers 3 --bind 127.0.0.1:8000 --access-logfile - --error-logfile -
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
