@@ -13,7 +13,7 @@ def main():
         .groupBy("username", "user_id")
         .agg(
             count("endpoint").alias("total_requests"),
-            spark_max("timestamp").alias("last_seen"),
+            spark_max(col("timestamp").cast("timestamp")).alias("last_seen"),
         )
         .withColumn("last_updated", current_timestamp())
     )
