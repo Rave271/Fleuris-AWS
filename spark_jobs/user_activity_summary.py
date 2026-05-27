@@ -10,6 +10,7 @@ def main():
     logs = spark.read.json(log_path)
     activity = (
         logs.filter(col("event_type") == "http_request")
+        .filter(col("username").isNotNull())
         .groupBy("username", "user_id")
         .agg(
             count("endpoint").alias("total_requests"),
